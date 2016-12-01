@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"time"
 
 	"gitlab.meitu.com/ryq/mqttstat/mqtt"
@@ -221,6 +222,14 @@ func main() {
 	flag.BoolVar(&cfg.CleanSession, "cleansession", true, "clean session or not")
 	flag.StringVar(&cfg.ClientID, "clientid", "mqttstat", "client id of this connection")
 	flag.StringVar(&address, "server", "127.0.0.1:1883", "server address")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [global options] subcommand [options]\n", os.Args[0])
+		fmt.Fprintln(os.Stderr, "global options:")
+		flag.PrintDefaults()
+		fmt.Fprintln(os.Stderr, "Subcommands:")
+		fmt.Fprintln(os.Stderr, "  publish [options]")
+		fmt.Fprintln(os.Stderr, "  subscribe [options]")
+	}
 	flag.Parse()
 
 	cfg.TLSConfig = &tls.Config{InsecureSkipVerify: true}
@@ -244,7 +253,7 @@ func main() {
 	}
 
 	//print the results
-	fmt.Println("Connected to", color(GreenFmt, address), "\n")
+	fmt.Println("Connected to", color(GreenFmt, address), "from", c.LocalAddr(), "\n")
 	if cfg.Username != "" {
 		fmt.Println(color(GreyFmt, "Username"), ":", color(GreenFmt, cfg.Username))
 	}

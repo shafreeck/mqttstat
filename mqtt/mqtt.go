@@ -250,6 +250,13 @@ func (c *Client) Disconnect() error {
 	return nil
 }
 
+func (c *Client) RemoteAddr() net.Addr {
+	return c.conn.RemoteAddr()
+}
+func (c *Client) LocalAddr() net.Addr {
+	return c.conn.LocalAddr()
+}
+
 func (c *Client) TracePoints() []*TracePoint {
 	return c.tracer.Points()
 }
