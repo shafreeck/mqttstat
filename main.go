@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gitlab.meitu.com/ryq/mqttstat/mqtt"
+	"gitlab.meitu.com/ryq/mqttstat/subcmd"
 )
 
 const (
@@ -91,7 +92,50 @@ func parseStat(points []*mqtt.TracePoint) *Stat {
 		f = field
 	}
 
-	f.Cost = fmt.Sprint(ts[mqtt.TraceConnack].Sub(last))
+	t := ts[mqtt.TraceConnack]
+	f.Cost = fmt.Sprint(t.Sub(last))
+	last = t
+
+	if t, found := ts[mqtt.TracePublish]; found {
+		f.End = ""
+
+		field := &Field{Name: MQTTPublishField, Begin: "|", End: "]", Len: len(MQTTPublishField) + 3, Time: t}
+		stat.fields = append(stat.fields, field)
+
+		last = t
+		f = field
+
+		if t, found := ts[mqtt.TracePuback]; found {
+			f.Cost = fmt.Sprint(t.Sub(last))
+			last = t
+		}
+	}
+
+	if t, found := ts[mqtt.TraceSubscribe]; found {
+		f.End = ""
+
+		field := &Field{Name: MQTTSubscribeField, Begin: "|", End: "]", Len: len(MQTTSubscribeField) + 3, Time: t}
+		stat.fields = append(stat.fields, field)
+
+		last = t
+		f = field
+
+		if t, found := ts[mqtt.TraceSuback]; found {
+			f.Cost = fmt.Sprint(t.Sub(last))
+			last = t
+		}
+	}
+
+	if t, found := ts[mqtt.TraceMessage]; found {
+		f.End = ""
+
+		field := &Field{Name: MQTTMessageRecvField, Begin: "|", End: "]", Len: len(MQTTMessageRecvField) + 3, Time: last} // Use last as the start time
+		stat.fields = append(stat.fields, field)
+		field.Cost = fmt.Sprint(t.Sub(last))
+
+		f = field
+		last = t
+	}
 	return stat
 }
 
@@ -175,7 +219,7 @@ func main() {
 	flag.StringVar(&cfg.Username, "username", "", "username to connect to broker")
 	flag.StringVar(&cfg.Password, "password", "", "password of user")
 	flag.BoolVar(&cfg.CleanSession, "cleansession", true, "clean session or not")
-	flag.StringVar(&cfg.ClientID, "clientid", "", "client id of this connection")
+	flag.StringVar(&cfg.ClientID, "clientid", "mqttstat", "client id of this connection")
 	flag.StringVar(&address, "server", "127.0.0.1:1883", "server address")
 	flag.Parse()
 
@@ -184,7 +228,22 @@ func main() {
 	if err := c.Dial(address); err != nil {
 		log.Fatalln(err)
 	}
+	args := flag.Args()
+	if len(args) > 0 {
+		var call subcmd.SubCommand
+		switch cmd := args[0]; cmd {
+		case "publish":
+			call = subcmd.PublishCommand
+		case "subscribe":
+			call = subcmd.SubscribeCommand
+		}
 
+		if err := call(c, args[1:]); err != nil {
+			log.Fatalln(err)
+		}
+	}
+
+	//print the results
 	fmt.Println("Connected to", color(GreenFmt, address), "\n")
 	if cfg.Username != "" {
 		fmt.Println(color(GreyFmt, "Username"), ":", color(GreenFmt, cfg.Username))
@@ -197,6 +256,6 @@ func main() {
 	}
 	fmt.Println(color(GreyFmt, "CleanSession"), ":", color(GreenFmt, cfg.CleanSession))
 	fmt.Println()
-	parseStat(c.TracePoints()).Display()
 
+	parseStat(c.TracePoints()).Display()
 }

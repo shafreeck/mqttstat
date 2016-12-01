@@ -14,6 +14,7 @@ const (
 	TraceSuback    = "Suback"
 	TracePublish   = "Publish"
 	TracePuback    = "Puback"
+	TraceMessage   = "Message"
 )
 
 type Tracer interface {

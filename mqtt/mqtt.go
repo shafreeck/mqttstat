@@ -23,8 +23,8 @@ type ClientConfig struct {
 
 //ACK is the ack message of all control packets
 type ACK struct {
-	Err      error
-	PacketID int
+	ControlPacket packets.ControlPacket
+	PacketID      int
 }
 
 //MessageHandler is a callback to process the received message
@@ -33,15 +33,20 @@ type MessageHandler func(topic string, message []byte, qos int) error
 //Client talks with server
 type Client struct {
 	conn   net.Conn
-	hook   Hook
 	cfg    *ClientConfig
 	tracer Tracer
+
+	errc chan error
+	rr   map[uint16]chan ACK //request-reply mapping
+	id   uint64
 }
 
 func NewClient(cfg *ClientConfig) *Client {
 	c := new(Client)
 	c.cfg = cfg
 	c.tracer = defaultTracer
+	c.errc = make(chan error, 1)
+	c.rr = make(map[uint16]chan ACK)
 	return c
 }
 
@@ -137,15 +142,108 @@ func (c *Client) Dial(url string, dialer ...net.Dialer) error {
 		return errors.New("MQTT connect failed")
 	}
 	c.tracer.AddPoint(TraceConnack, time.Now())
+
+	go c.recvHandler()
 	return nil
 }
 
+func (c *Client) idGen() uint16 {
+	c.id++
+	return uint16(c.id & 0xFFFF)
+}
+
 func (c *Client) Subscribe(topics []string, qoss []int) error {
+	p := &packets.SubscribePacket{FixedHeader: packets.FixedHeader{MessageType: packets.Subscribe, Qos: 1}}
+
+	p.Topics = topics[:]
+	for i := range qoss {
+		p.Qoss = append(p.Qoss, byte(qoss[i]))
+	}
+
+	p.MessageID = c.idGen()
+
+	ackc := make(chan ACK, 1)
+	c.rr[p.MessageID] = ackc
+
+	if c.tracer != nil {
+		c.tracer.AddPoint(TraceSubscribe, time.Now())
+	}
+
+	if err := p.Write(c.conn); err != nil {
+		return err
+	}
+
+	ack := <-ackc
+	suback := ack.ControlPacket.(*packets.SubackPacket)
+	for i, rc := range suback.ReturnCodes {
+		if rc == 0x80 {
+			return errors.New("Subscribe topic " + topics[i] + " failed")
+		}
+	}
+
 	return nil
 }
 
 func (c *Client) Publish(topic string, message []byte, qos int) (chan ACK, error) {
-	return nil, nil
+	p := &packets.PublishPacket{FixedHeader: packets.FixedHeader{MessageType: packets.Publish}}
+	p.TopicName = topic
+	p.Qos = byte(qos)
+	p.Payload = message[:] //copy the slice
+	p.MessageID = c.idGen()
+
+	ackc := make(chan ACK, 1)
+	c.rr[p.MessageID] = ackc
+
+	if c.tracer != nil {
+		c.tracer.AddPoint(TracePublish, time.Now())
+	}
+	if err := p.Write(c.conn); err != nil {
+		return nil, err
+	}
+
+	return ackc, nil
+}
+
+func (c *Client) recvHandler() {
+	for {
+		cp, err := packets.ReadPacket(c.conn)
+		if err != nil {
+			c.errc <- err
+		}
+		switch p := cp.(type) {
+		case *packets.PubackPacket:
+			ackc, found := c.rr[p.MessageID]
+			if !found {
+				continue
+			}
+			if c.tracer != nil {
+				c.tracer.AddPoint(TracePuback, time.Now())
+			}
+			ackc <- ACK{PacketID: int(p.MessageID), ControlPacket: cp}
+		case *packets.SubackPacket:
+			ackc, found := c.rr[p.MessageID]
+			if !found {
+				continue
+			}
+			if c.tracer != nil {
+				c.tracer.AddPoint(TraceSuback, time.Now())
+			}
+			ackc <- ACK{PacketID: int(p.MessageID), ControlPacket: cp}
+		case *packets.PublishPacket:
+			if c.tracer != nil {
+				c.tracer.AddPoint(TraceMessage, time.Now())
+			}
+			if f := c.cfg.RecvHandler; f != nil {
+				if err := f(p.TopicName, p.Payload, int(p.Qos)); err != nil {
+					c.errc <- err
+				}
+			}
+		}
+	}
+}
+
+func (c *Client) SetRecvHandler(h MessageHandler) {
+	c.cfg.RecvHandler = h
 }
 
 func (c *Client) Disconnect() error {
