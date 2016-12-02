@@ -27,12 +27,13 @@ const (
 
 const (
 	GreenFmt = "\033[32m%v\033[0m"
+	RedFmt   = "\033[31m%v\033[0m"
 	GreyFmt  = "\033[0;37m%v\033[0m"
 )
 
 type Field struct {
 	Name  string
-	Cost  string
+	Cost  time.Duration
 	Begin string
 	End   string
 	Len   int
@@ -65,7 +66,7 @@ func parseStat(points []*mqtt.TracePoint) *Stat {
 		field := &Field{Name: TCPConnectionField, Begin: "[", End: "", Len: len(TCPConnectionField) + 3, Time: t}
 		if len(stat.fields) > 0 {
 			field.Begin = "|"
-			f.Cost = fmt.Sprint(t.Sub(last))
+			f.Cost = t.Sub(last)
 		}
 
 		stat.fields = append(stat.fields, field)
@@ -75,7 +76,7 @@ func parseStat(points []*mqtt.TracePoint) *Stat {
 	}
 
 	if t, found := ts[mqtt.TraceTLSDial]; found {
-		f.Cost = fmt.Sprint(t.Sub(last))
+		f.Cost = t.Sub(last)
 
 		field := &Field{Name: TLSHandshakeField, Begin: "|", End: "", Len: len(TLSHandshakeField) + 3, Time: t}
 		stat.fields = append(stat.fields, field)
@@ -85,7 +86,7 @@ func parseStat(points []*mqtt.TracePoint) *Stat {
 	}
 
 	if t, found := ts[mqtt.TraceConnect]; found {
-		f.Cost = fmt.Sprint(t.Sub(last))
+		f.Cost = t.Sub(last)
 
 		field := &Field{Name: MQTTConnectionField, Begin: "|", End: "]", Len: len(MQTTConnectionField) + 3, Time: t}
 		stat.fields = append(stat.fields, field)
@@ -95,7 +96,7 @@ func parseStat(points []*mqtt.TracePoint) *Stat {
 	}
 
 	t := ts[mqtt.TraceConnack]
-	f.Cost = fmt.Sprint(t.Sub(last))
+	f.Cost = t.Sub(last)
 	last = t
 
 	if t, found := ts[mqtt.TraceSubscribe]; found {
@@ -108,7 +109,7 @@ func parseStat(points []*mqtt.TracePoint) *Stat {
 		f = field
 
 		if t, found := ts[mqtt.TraceSuback]; found {
-			f.Cost = fmt.Sprint(t.Sub(last))
+			f.Cost = t.Sub(last)
 			last = t
 		}
 	}
@@ -123,7 +124,7 @@ func parseStat(points []*mqtt.TracePoint) *Stat {
 		f = field
 
 		if t, found := ts[mqtt.TracePuback]; found {
-			f.Cost = fmt.Sprint(t.Sub(last))
+			f.Cost = t.Sub(last)
 			last = t
 		}
 	}
@@ -133,7 +134,7 @@ func parseStat(points []*mqtt.TracePoint) *Stat {
 
 		field := &Field{Name: MQTTMessageRecvField, Begin: "|", End: "]", Len: len(MQTTMessageRecvField) + 3, Time: last} // Use last as the start time
 		stat.fields = append(stat.fields, field)
-		field.Cost = fmt.Sprint(t.Sub(last))
+		field.Cost = t.Sub(last)
 
 		f = field
 		last = t
@@ -176,7 +177,7 @@ func (stat *Stat) Display() {
 		feedSpace(&lines[0], 1)
 
 		//cost line
-		spaceCount := field.Len - len(field.Begin) - len([]rune(field.Cost))
+		spaceCount := field.Len - len(field.Begin) - len([]rune(fmt.Sprint(field.Cost)))
 		if spaceCount < 0 {
 			feedSpace(&lines[0], -spaceCount)
 			spaceCount = 0
@@ -216,6 +217,61 @@ func (stat *Stat) Display() {
 	for _, line := range lines {
 		fmt.Println(line.String())
 	}
+}
+
+//supplied by "li ziang"
+func (stat *Stat) ZiangDispaly() {
+	var totalCost, min time.Duration
+	min = stat.fields[0].Cost
+	for _, field := range stat.fields {
+		if min > field.Cost {
+			min = field.Cost
+		}
+		totalCost += field.Cost
+	}
+
+	for _, field := range stat.fields {
+		fmt.Printf("%21v %15v\t", field.Name, field.Cost)
+		count := int(float64(field.Cost) * 100 / float64(totalCost))
+		out := ""
+		for i := 0; i < count; i++ {
+			out += "█"
+		}
+		if count > 100/len(stat.fields) {
+			fmt.Println(color(RedFmt, out))
+		} else {
+			fmt.Println(color(GreenFmt, out))
+		}
+	}
+
+}
+func (stat *Stat) VerticalDisplay() {
+	var totalCost, min, sofar time.Duration
+	min = stat.fields[0].Cost
+	for _, field := range stat.fields {
+		if min > field.Cost {
+			min = field.Cost
+		}
+		totalCost += field.Cost
+	}
+
+	unit := 1
+
+	fmt.Println(" --")
+	for _, field := range stat.fields {
+		lineCount := int(field.Cost/min) * unit
+		sofar += field.Cost
+
+		for i := 0; i < lineCount; i++ {
+			if i == lineCount/2 {
+				fmt.Printf(" |    %s (%v)\n", field.Name, color(GreenFmt, field.Cost))
+			} else {
+				fmt.Println(" | ")
+			}
+		}
+		fmt.Printf(" |<--  %v\n", color(GreenFmt, sofar))
+	}
+	fmt.Println(" --")
 }
 
 func main() {
@@ -299,6 +355,7 @@ func main() {
 			OutputTrace(tracePoints)
 		}
 		parseStat(tracePoints).Display()
+		parseStat(tracePoints).ZiangDispaly()
 
 		if i < count-1 {
 			time.Sleep(time.Duration(delay))
