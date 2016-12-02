@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"time"
 
 	"github.com/mattn/go-isatty"
@@ -164,7 +165,7 @@ func splitSpaceCount(count int) (int, int) {
 	return c, c + 1
 }
 
-func (stat *Stat) Display() {
+func (stat *Stat) Display(out io.Writer) {
 	lines := make([]bytes.Buffer, len(stat.fields)+3) // add extra 3 lines: field, time distribution, and total cost
 	start := stat.begin
 	total := ""
@@ -215,12 +216,12 @@ func (stat *Stat) Display() {
 	}
 
 	for _, line := range lines {
-		fmt.Println(line.String())
+		fmt.Fprintln(out, line.String())
 	}
 }
 
 //supplied by "li ziang"
-func (stat *Stat) ZiangDispaly() {
+func (stat *Stat) ZiangDispaly(out io.Writer) {
 	var totalCost, min time.Duration
 	min = stat.fields[0].Cost
 	for _, field := range stat.fields {
@@ -231,20 +232,20 @@ func (stat *Stat) ZiangDispaly() {
 	}
 
 	for _, field := range stat.fields {
-		fmt.Printf("%-21v  %15v\t", field.Name, field.Cost)
+		fmt.Fprintf(out, "%-21v  %15v\t", field.Name, field.Cost)
 		count := int(float64(field.Cost) * 100 / float64(totalCost))
-		out := ""
+		line := ""
 		for i := 0; i < count; i++ {
-			out += "█"
+			line += "█"
 		}
 		if count > 100/len(stat.fields) {
-			fmt.Println(color(RedFmt, out))
+			fmt.Fprintln(out, color(RedFmt, line))
 		} else {
-			fmt.Println(color(GreenFmt, out))
+			fmt.Fprintln(out, color(GreenFmt, line))
 		}
 	}
-
 }
+
 func (stat *Stat) VerticalDisplay() {
 	var totalCost, min, sofar time.Duration
 	min = stat.fields[0].Cost
@@ -276,7 +277,7 @@ func (stat *Stat) VerticalDisplay() {
 
 func main() {
 	var address string
-	var sessionTicketEnable, trace bool
+	var sessionTicketEnable, trace, inplace bool
 	var count int
 	var delay time.Duration
 
@@ -289,6 +290,7 @@ func main() {
 	flag.IntVar(&count, "count", 1, "count to run")
 	flag.DurationVar(&delay, "delay", 200*time.Millisecond, "time to delay before next round")
 	flag.BoolVar(&trace, "trace", false, "print trace points")
+	flag.BoolVar(&inplace, "inplace", false, "keep running and output results inplace")
 
 	flag.IntVar(&cfg.TCPConfig.Linger, "tcp.linger", -1, "set tcp linger")
 	flag.IntVar(&cfg.TCPConfig.RecvBuf, "tcp.recvbuf", 0, "tcp recv buffer size")
@@ -315,7 +317,16 @@ func main() {
 			count = 2
 		}
 	}
-	for i := 0; i < count; i++ {
+
+	sc := make(chan os.Signal, 1)
+	signal.Notify(sc, os.Interrupt)
+	go func() {
+		<-sc
+		ShowCursor()
+		os.Exit(0)
+	}()
+
+	for i := 0; i < count || inplace; i++ {
 		c := mqtt.NewClient(cfg)
 		if err := c.Dial(address); err != nil {
 			log.Fatalln(err)
@@ -336,31 +347,48 @@ func main() {
 		}
 		c.Disconnect()
 
+		out := bytes.NewBuffer(nil)
 		//print the results
-		fmt.Println("Connected to", color(GreenFmt, address), "from", c.LocalAddr(), "\n")
+		fmt.Fprintln(out, "Connected to", color(GreenFmt, address), "from", c.LocalAddr(), "\n")
 		if cfg.Username != "" {
-			fmt.Println(color(GreyFmt, "Username"), ":", color(GreenFmt, cfg.Username))
+			fmt.Fprintln(out, color(GreyFmt, "Username"), ":", color(GreenFmt, cfg.Username))
 		}
 		if cfg.Password != "" {
-			fmt.Println(color(GreyFmt, "Password"), ":", color(GreenFmt, cfg.Password))
+			fmt.Fprintln(out, color(GreyFmt, "Password"), ":", color(GreenFmt, cfg.Password))
 		}
 		if cfg.ClientID != "" {
-			fmt.Println(color(GreyFmt, "ClientID"), ":", color(GreenFmt, cfg.ClientID))
+			fmt.Fprintln(out, color(GreyFmt, "ClientID"), ":", color(GreenFmt, cfg.ClientID))
 		}
-		fmt.Println(color(GreyFmt, "CleanSession"), ":", color(GreenFmt, cfg.CleanSession))
-		fmt.Println()
+		fmt.Fprintln(out, color(GreyFmt, "CleanSession"), ":", color(GreenFmt, cfg.CleanSession))
+		fmt.Fprintln(out)
 
 		tracePoints := c.TracePoints()
 		if trace {
 			OutputTrace(tracePoints)
 		}
-		parseStat(tracePoints).Display()
-		parseStat(tracePoints).ZiangDispaly()
 
-		if i < count-1 {
+		stat := parseStat(tracePoints)
+		stat.Display(out)
+		stat.ZiangDispaly(out)
+
+		if inplace {
+			ResetCursor()
+		}
+
+		fmt.Print(out)
+
+		if i < count-1 || inplace {
 			time.Sleep(time.Duration(delay))
 		}
 	}
+}
+func ResetCursor() {
+	fmt.Print("\033[1;1H")
+	fmt.Print("\033[?25l")
+	fmt.Print("\033[2J")
+}
+func ShowCursor() {
+	fmt.Print("\033[?25h")
 }
 
 func OutputTrace(points []*mqtt.TracePoint) {
