@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/mattn/go-isatty"
 	"gitlab.meitu.com/ryq/mqttstat/mqtt"
 	"gitlab.meitu.com/ryq/mqttstat/subcmd"
 )
@@ -97,21 +98,6 @@ func parseStat(points []*mqtt.TracePoint) *Stat {
 	f.Cost = fmt.Sprint(t.Sub(last))
 	last = t
 
-	if t, found := ts[mqtt.TracePublish]; found {
-		f.End = ""
-
-		field := &Field{Name: MQTTPublishField, Begin: "|", End: "]", Len: len(MQTTPublishField) + 3, Time: t}
-		stat.fields = append(stat.fields, field)
-
-		last = t
-		f = field
-
-		if t, found := ts[mqtt.TracePuback]; found {
-			f.Cost = fmt.Sprint(t.Sub(last))
-			last = t
-		}
-	}
-
 	if t, found := ts[mqtt.TraceSubscribe]; found {
 		f.End = ""
 
@@ -122,6 +108,21 @@ func parseStat(points []*mqtt.TracePoint) *Stat {
 		f = field
 
 		if t, found := ts[mqtt.TraceSuback]; found {
+			f.Cost = fmt.Sprint(t.Sub(last))
+			last = t
+		}
+	}
+
+	if t, found := ts[mqtt.TracePublish]; found {
+		f.End = ""
+
+		field := &Field{Name: MQTTPublishField, Begin: "|", End: "]", Len: len(MQTTPublishField) + 3, Time: t}
+		stat.fields = append(stat.fields, field)
+
+		last = t
+		f = field
+
+		if t, found := ts[mqtt.TracePuback]; found {
 			f.Cost = fmt.Sprint(t.Sub(last))
 			last = t
 		}
@@ -141,7 +142,10 @@ func parseStat(points []*mqtt.TracePoint) *Stat {
 }
 
 func color(colorfmt string, v interface{}) string {
-	return fmt.Sprintf(colorfmt, v)
+	if isatty.IsTerminal(os.Stdout.Fd()) {
+		return fmt.Sprintf(colorfmt, v)
+	}
+	return fmt.Sprint(v)
 }
 
 func feedSpace(w io.Writer, count int) {
@@ -216,12 +220,29 @@ func (stat *Stat) Display() {
 
 func main() {
 	var address string
+	var sessionTicketEnable, trace bool
+	var count int
+	var delay time.Duration
+
 	cfg := &mqtt.ClientConfig{}
 	flag.StringVar(&cfg.Username, "username", "", "username to connect to broker")
 	flag.StringVar(&cfg.Password, "password", "", "password of user")
 	flag.BoolVar(&cfg.CleanSession, "cleansession", true, "clean session or not")
 	flag.StringVar(&cfg.ClientID, "clientid", "mqttstat", "client id of this connection")
 	flag.StringVar(&address, "server", "127.0.0.1:1883", "server address")
+	flag.IntVar(&count, "count", 1, "count to run")
+	flag.DurationVar(&delay, "delay", 200*time.Millisecond, "time to delay before next round")
+	flag.BoolVar(&trace, "trace", false, "print trace points")
+
+	flag.IntVar(&cfg.TCPConfig.Linger, "tcp.linger", -1, "set tcp linger")
+	flag.IntVar(&cfg.TCPConfig.RecvBuf, "tcp.recvbuf", 0, "tcp recv buffer size")
+	flag.IntVar(&cfg.TCPConfig.SendBuf, "tcp.sendbuf", 0, "tcp send buffer size")
+	flag.BoolVar(&cfg.TCPConfig.NoDelay, "tcp.nodelay", true, "set tcp nodelay")
+	flag.BoolVar(&cfg.TCPConfig.Keepalive, "tcp.keepalive", true, "set tcp keepalive")
+
+	flag.BoolVar(&sessionTicketEnable, "tls.sesstionticket", false, "enable session ticket, works only when connected by tls")
+	flag.BoolVar(&cfg.TLSConfig.InsecureSkipVerify, "tls.skipverify", true, "skip server tls verify")
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [global options] subcommand [options]\n", os.Args[0])
 		fmt.Fprintln(os.Stderr, "global options:")
@@ -232,39 +253,61 @@ func main() {
 	}
 	flag.Parse()
 
-	cfg.TLSConfig = &tls.Config{InsecureSkipVerify: true}
-	c := mqtt.NewClient(cfg)
-	if err := c.Dial(address); err != nil {
-		log.Fatalln(err)
-	}
-	args := flag.Args()
-	if len(args) > 0 {
-		var call subcmd.SubCommand
-		switch cmd := args[0]; cmd {
-		case "publish":
-			call = subcmd.PublishCommand
-		case "subscribe":
-			call = subcmd.SubscribeCommand
+	if sessionTicketEnable {
+		cfg.TLSConfig.ClientSessionCache = tls.NewLRUClientSessionCache(0)
+		if count < 2 {
+			count = 2
 		}
-
-		if err := call(c, args[1:]); err != nil {
+	}
+	for i := 0; i < count; i++ {
+		c := mqtt.NewClient(cfg)
+		if err := c.Dial(address); err != nil {
 			log.Fatalln(err)
 		}
-	}
+		args := flag.Args()
+		if len(args) > 0 {
+			var call subcmd.SubCommand
+			switch cmd := args[0]; cmd {
+			case "publish":
+				call = subcmd.PublishCommand
+			case "subscribe":
+				call = subcmd.SubscribeCommand
+			}
 
-	//print the results
-	fmt.Println("Connected to", color(GreenFmt, address), "from", c.LocalAddr(), "\n")
-	if cfg.Username != "" {
-		fmt.Println(color(GreyFmt, "Username"), ":", color(GreenFmt, cfg.Username))
-	}
-	if cfg.Password != "" {
-		fmt.Println(color(GreyFmt, "Password"), ":", color(GreenFmt, cfg.Password))
-	}
-	if cfg.ClientID != "" {
-		fmt.Println(color(GreyFmt, "ClientID"), ":", color(GreenFmt, cfg.ClientID))
-	}
-	fmt.Println(color(GreyFmt, "CleanSession"), ":", color(GreenFmt, cfg.CleanSession))
-	fmt.Println()
+			if err := call(c, args[1:]); err != nil {
+				log.Fatalln(err)
+			}
+		}
+		c.Disconnect()
 
-	parseStat(c.TracePoints()).Display()
+		//print the results
+		fmt.Println("Connected to", color(GreenFmt, address), "from", c.LocalAddr(), "\n")
+		if cfg.Username != "" {
+			fmt.Println(color(GreyFmt, "Username"), ":", color(GreenFmt, cfg.Username))
+		}
+		if cfg.Password != "" {
+			fmt.Println(color(GreyFmt, "Password"), ":", color(GreenFmt, cfg.Password))
+		}
+		if cfg.ClientID != "" {
+			fmt.Println(color(GreyFmt, "ClientID"), ":", color(GreenFmt, cfg.ClientID))
+		}
+		fmt.Println(color(GreyFmt, "CleanSession"), ":", color(GreenFmt, cfg.CleanSession))
+		fmt.Println()
+
+		tracePoints := c.TracePoints()
+		if trace {
+			OutputTrace(tracePoints)
+		}
+		parseStat(tracePoints).Display()
+
+		if i < count-1 {
+			time.Sleep(time.Duration(delay))
+		}
+	}
+}
+
+func OutputTrace(points []*mqtt.TracePoint) {
+	for _, p := range points {
+		fmt.Println(p.Key, p.Time)
+	}
 }

@@ -39,8 +39,6 @@ func (t *tracer) Points() []*TracePoint {
 	return t.points
 }
 
-var defaultTracer Tracer
-
-func init() {
-	defaultTracer = &tracer{points: make([]*TracePoint, 0)}
+func DefaultTracer() Tracer {
+	return &tracer{points: make([]*TracePoint, 0)}
 }

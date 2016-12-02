@@ -18,7 +18,16 @@ type ClientConfig struct {
 	WillMessage  bool
 
 	RecvHandler MessageHandler
-	TLSConfig   *tls.Config
+	TLSConfig   tls.Config
+	TCPConfig   TCPConfig
+}
+
+type TCPConfig struct {
+	Linger    int
+	NoDelay   bool
+	SendBuf   int
+	RecvBuf   int
+	Keepalive bool
 }
 
 //ACK is the ack message of all control packets
@@ -44,7 +53,7 @@ type Client struct {
 func NewClient(cfg *ClientConfig) *Client {
 	c := new(Client)
 	c.cfg = cfg
-	c.tracer = defaultTracer
+	c.tracer = DefaultTracer()
 	c.errc = make(chan error, 1)
 	c.rr = make(map[uint16]chan ACK)
 	return c
@@ -103,10 +112,20 @@ func (c *Client) Dial(url string, dialer ...net.Dialer) error {
 	if err != nil {
 		return err
 	}
-	c.conn = tcpConn
+	tcpc := tcpConn.(*net.TCPConn)
+	tcpc.SetKeepAlive(c.cfg.TCPConfig.Keepalive)
+	tcpc.SetLinger(c.cfg.TCPConfig.Linger)
+	tcpc.SetNoDelay(c.cfg.TCPConfig.NoDelay)
+	if c.cfg.TCPConfig.RecvBuf > 0 {
+		tcpc.SetReadBuffer(c.cfg.TCPConfig.RecvBuf)
+	}
+	if c.cfg.TCPConfig.SendBuf > 0 {
+		tcpc.SetWriteBuffer(c.cfg.TCPConfig.SendBuf)
+	}
+	c.conn = tcpc
 
 	if scheme == tlsScheme {
-		tlsConn := tls.Client(tcpConn, c.cfg.TLSConfig)
+		tlsConn := tls.Client(tcpConn, &c.cfg.TLSConfig)
 		c.tracer.AddPoint(TraceTLSDial, time.Now())
 		if err := tlsConn.Handshake(); err != nil {
 			return err
@@ -191,11 +210,14 @@ func (c *Client) Publish(topic string, message []byte, qos int) (chan ACK, error
 	p.Payload = message[:] //copy the slice
 	p.MessageID = c.idGen()
 
-	ackc := make(chan ACK, 1)
-	c.rr[p.MessageID] = ackc
-
 	if c.tracer != nil {
 		c.tracer.AddPoint(TracePublish, time.Now())
+	}
+
+	var ackc chan ACK
+	if qos > 0 {
+		ackc = make(chan ACK, 1)
+		c.rr[p.MessageID] = ackc
 	}
 	if err := p.Write(c.conn); err != nil {
 		return nil, err
@@ -247,7 +269,9 @@ func (c *Client) SetRecvHandler(h MessageHandler) {
 }
 
 func (c *Client) Disconnect() error {
-	return nil
+	p := &packets.DisconnectPacket{FixedHeader: packets.FixedHeader{MessageType: packets.Disconnect}}
+	p.Write(c.conn)
+	return c.conn.Close()
 }
 
 func (c *Client) RemoteAddr() net.Addr {
