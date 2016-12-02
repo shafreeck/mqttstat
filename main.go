@@ -231,7 +231,7 @@ func (stat *Stat) ZiangDispaly() {
 	}
 
 	for _, field := range stat.fields {
-		fmt.Printf("%21v %15v\t", field.Name, field.Cost)
+		fmt.Printf("%-21v  %15v\t", field.Name, field.Cost)
 		count := int(float64(field.Cost) * 100 / float64(totalCost))
 		out := ""
 		for i := 0; i < count; i++ {
