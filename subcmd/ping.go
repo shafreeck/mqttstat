@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 
-	"gitlab.meitu.com/ryq/mqttstat/mqtt"
+	"github.com/shafreeck/mqttstat/mqtt"
 )
 
 func PingCommand(c *mqtt.Client, args []string) error {

@@ -1,7 +1,7 @@
 package subcmd
 
 import (
-	"gitlab.meitu.com/ryq/mqttstat/mqtt"
+	"github.com/shafreeck/mqttstat/mqtt"
 )
 
 type SubCommand func(c *mqtt.Client, args []string) error

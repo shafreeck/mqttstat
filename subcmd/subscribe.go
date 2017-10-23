@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gitlab.meitu.com/ryq/mqttstat/mqtt"
+	"github.com/shafreeck/mqttstat/mqtt"
 )
 
 func SubscribeCommand(c *mqtt.Client, args []string) error {

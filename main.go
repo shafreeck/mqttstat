@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/mattn/go-isatty"
-	"gitlab.meitu.com/ryq/mqttstat/mqtt"
-	"gitlab.meitu.com/ryq/mqttstat/subcmd"
+	"github.com/shafreeck/mqttstat/mqtt"
+	"github.com/shafreeck/mqttstat/subcmd"
 )
 
 const (

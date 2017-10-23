@@ -3,7 +3,7 @@ package subcmd
 import (
 	"flag"
 	"fmt"
-	"gitlab.meitu.com/ryq/mqttstat/mqtt"
+	"github.com/shafreeck/mqttstat/mqtt"
 )
 
 func PublishCommand(c *mqtt.Client, args []string) error {
