@@ -411,6 +411,6 @@ func ShowCursor() {
 
 func OutputTrace(points []*mqtt.TracePoint) {
 	for _, p := range points {
-		fmt.Println(p.Key, p.Time)
+		fmt.Printf("%-10s%v\n", p.Key, p.Time)
 	}
 }
