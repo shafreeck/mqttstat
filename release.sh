@@ -1,11 +1,17 @@
 #!/bin/bash
 
-mkdir -p ./mqttstat-release
-echo build ./mqttstat-release/mqttstat.linux
-env GOOS=linux go build -o ./mqttstat-release/mqttstat.linux
+version=`awk '/Version/{gsub("\"", "", $4); print $4}' version.go`
 
-echo build ./mqttstat-release/mqttstat.darwin
-env GOOS=darwin go build -o ./mqttstat-release/mqttstat.darwin
+pkg=./mqttstat-v$version
+mkdir -p $pkg
 
-echo build ./mqttstat-release/mqttstat.exe
-env GOOS=windows go build -o ./mqttstat-release/mqttstat.exe
+echo build $pkg/mqttstat
+env GOOS=linux go build -o $pkg/mqttstat
+
+echo build $pkg/mqttstat.darwin
+env GOOS=darwin go build -o $pkg/mqttstat.darwin
+
+echo build $pkg/mqttstat.exe
+env GOOS=windows go build -o $pkg/mqttstat.exe
+
+tar -zcf $pkg.tar.gz $pkg

@@ -293,7 +293,7 @@ func (stat *Stat) VerticalDisplay() {
 
 func main() {
 	var address string
-	var sessionTicketEnable, trace, inplace bool
+	var sessionTicketEnable, trace, inplace, version bool
 	var count int
 	var delay time.Duration
 
@@ -307,6 +307,7 @@ func main() {
 	flag.DurationVar(&delay, "delay", 200*time.Millisecond, "time to delay before next round")
 	flag.BoolVar(&trace, "trace", false, "print trace points")
 	flag.BoolVar(&inplace, "inplace", false, "keep running and output results inplace")
+	flag.BoolVar(&version, "v", false, "print version and exit")
 
 	flag.IntVar(&cfg.TCPConfig.Linger, "tcp.linger", -1, "set tcp linger")
 	flag.IntVar(&cfg.TCPConfig.RecvBuf, "tcp.recvbuf", 0, "tcp recv buffer size")
@@ -327,6 +328,11 @@ func main() {
 		fmt.Fprintln(os.Stderr, "  ping      [options]")
 	}
 	flag.Parse()
+
+	if version {
+		fmt.Println(Version)
+		return
+	}
 
 	if sessionTicketEnable {
 		cfg.TLSConfig.ClientSessionCache = tls.NewLRUClientSessionCache(0)
