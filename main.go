@@ -24,6 +24,7 @@ const (
 	MQTTSubscribeField   = "MQTT Subscribe"
 	MQTTPublishField     = "MQTT Publish"
 	MQTTMessageRecvField = "MQTT Message Received"
+	MQTTPingPongField    = "MQTT PingPong"
 )
 
 const (
@@ -125,6 +126,21 @@ func parseStat(points []*mqtt.TracePoint) *Stat {
 		f = field
 
 		if t, found := ts[mqtt.TracePuback]; found {
+			f.Cost = t.Sub(last)
+			last = t
+		}
+	}
+
+	if t, found := ts[mqtt.TracePing]; found {
+		f.End = ""
+
+		field := &Field{Name: MQTTPingPongField, Begin: "|", End: "]", Len: len(MQTTPingPongField) + 3, Time: t}
+		stat.fields = append(stat.fields, field)
+
+		last = t
+		f = field
+
+		if t, found := ts[mqtt.TracePong]; found {
 			f.Cost = t.Sub(last)
 			last = t
 		}
@@ -339,6 +355,8 @@ func main() {
 				call = subcmd.PublishCommand
 			case "subscribe":
 				call = subcmd.SubscribeCommand
+			case "ping":
+				call = subcmd.PingCommand
 			}
 
 			if err := call(c, args[1:]); err != nil {

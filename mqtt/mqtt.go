@@ -36,6 +36,10 @@ type ACK struct {
 	PacketID      int
 }
 
+type Pong struct {
+	packets.PingrespPacket
+}
+
 //MessageHandler is a callback to process the received message
 type MessageHandler func(topic string, message []byte, qos int) error
 
@@ -48,6 +52,8 @@ type Client struct {
 	errc chan error
 	rr   map[uint16]chan ACK //request-reply mapping
 	id   uint64
+
+	heartbeatc chan Pong //heartbeat channel
 }
 
 func NewClient(cfg *ClientConfig) *Client {
@@ -56,6 +62,7 @@ func NewClient(cfg *ClientConfig) *Client {
 	c.tracer = DefaultTracer()
 	c.errc = make(chan error, 1)
 	c.rr = make(map[uint16]chan ACK)
+	c.heartbeatc = make(chan Pong, 1)
 	return c
 }
 
@@ -226,6 +233,17 @@ func (c *Client) Publish(topic string, message []byte, qos int) (chan ACK, error
 	return ackc, nil
 }
 
+func (c *Client) Ping() (chan Pong, error) {
+	p := &packets.PingreqPacket{FixedHeader: packets.FixedHeader{MessageType: packets.Pingreq}}
+	if c.tracer != nil {
+		c.tracer.AddPoint(TracePing, time.Now())
+	}
+	if err := p.Write(c.conn); err != nil {
+		return nil, err
+	}
+	return c.heartbeatc, nil
+}
+
 func (c *Client) recvHandler() {
 	for {
 		cp, err := packets.ReadPacket(c.conn)
@@ -260,6 +278,11 @@ func (c *Client) recvHandler() {
 					c.errc <- err
 				}
 			}
+		case *packets.PingrespPacket:
+			if c.tracer != nil {
+				c.tracer.AddPoint(TracePong, time.Now())
+			}
+			c.heartbeatc <- Pong{}
 		}
 	}
 }

@@ -15,6 +15,8 @@ const (
 	TracePublish   = "Publish"
 	TracePuback    = "Puback"
 	TraceMessage   = "Message"
+	TracePing      = "Ping"
+	TracePong      = "Pong"
 )
 
 type Tracer interface {
