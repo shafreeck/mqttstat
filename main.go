@@ -322,8 +322,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "global options:")
 		flag.PrintDefaults()
 		fmt.Fprintln(os.Stderr, "Subcommands:")
-		fmt.Fprintln(os.Stderr, "  publish [options]")
+		fmt.Fprintln(os.Stderr, "  publish   [options]")
 		fmt.Fprintln(os.Stderr, "  subscribe [options]")
+		fmt.Fprintln(os.Stderr, "  ping      [options]")
 	}
 	flag.Parse()
 
